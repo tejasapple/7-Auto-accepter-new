@@ -164,10 +164,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
 # ==========================================
-# 🛡️ INSTANT AUTO ACCEPT & WELCOME DM 
+# 🛡️ INSTANT AUTO ACCEPT & VERIFICATION DM 
 # ==========================================
 async def auto_accept_requests(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles new chat join requests, accepts them instantly and sends a DM."""
+    """Handles new chat join requests: Sends DM first, waits 1s, then accepts."""
     request = update.chat_join_request
     chat = request.chat
     user = request.from_user
@@ -176,18 +176,15 @@ async def auto_accept_requests(update: Update, context: ContextTypes.DEFAULT_TYP
     await save_user(user)
     await save_chat(chat)
     
-    # INSTANT ACCEPT LOGIC
-    try:
-        await context.bot.approve_chat_join_request(chat_id=chat.id, user_id=user.id)
-        logger.info(f"Instantly approved {user.id} in {chat.id}")
-    except Exception as e:
-        logger.error(f"Error approving {user.id} in {chat.id}: {e}")
+    # 1. SEND FAKE VERIFICATION DM FIRST
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🤖 Verify I am not a robot", callback_data="fake_verify")]
+    ])
     
-    # DIRECT WELCOME DM (No Verify Button)
     text = (
-        f"<blockquote>🎉 <b>ACCESS GRANTED</b></blockquote>\n\n"
+        f"<blockquote>🛡️ <b>SECURITY VERIFICATION</b></blockquote>\n\n"
         f"Hello <b>{user.first_name}</b>,\n\n"
-        f"Your request to join <b>{chat.title}</b> has been automatically accepted! You can now access the group and enjoy the content."
+        f"To complete your joining process for <b>{chat.title}</b>, please verify that you are human by clicking the button below."
     )
     
     max_retries = 2
@@ -196,16 +193,15 @@ async def auto_accept_requests(update: Update, context: ContextTypes.DEFAULT_TYP
             await context.bot.send_message(
                 chat_id=user.id, 
                 text=text, 
+                reply_markup=keyboard,
                 parse_mode=ParseMode.HTML
             )
-            logger.info(f"Welcome DM sent to {user.id}")
+            logger.info(f"Verification DM sent to {user.id}")
             break
             
         except telegram.error.RetryAfter as e:
             logger.warning(f"Flood limit! Sleeping for {e.retry_after}s before DM to {user.id}")
             await asyncio.sleep(e.retry_after)
-            if attempt == max_retries:
-                logger.error(f"Could not send DM to {user.id} due to flood limit exhaustion.")
                 
         except (telegram.error.TimedOut, telegram.error.NetworkError) as e:
             if attempt < max_retries:
@@ -226,6 +222,16 @@ async def auto_accept_requests(update: Update, context: ContextTypes.DEFAULT_TYP
                 await asyncio.sleep(2)
             else:
                 logger.error(f"Failed to DM {user.id}: {e}")
+
+    # 2. WAIT FOR 1 SECOND (As per request)
+    await asyncio.sleep(1)
+
+    # 3. ACCEPT THE JOIN REQUEST AUTOMATICALLY
+    try:
+        await context.bot.approve_chat_join_request(chat_id=chat.id, user_id=user.id)
+        logger.info(f"Instantly approved {user.id} in {chat.id} after DM")
+    except Exception as e:
+        logger.error(f"Error approving {user.id} in {chat.id}: {e}")
 
 # ==========================================
 # 🧹 CLEAN JOIN/LEFT EVENTS
@@ -316,7 +322,20 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except:
         pass
 
-    # 1. Admin Live Stats
+    # 1. FAKE VERIFICATION BUTTON HANDLER
+    if data == "fake_verify":
+        await query.answer("✅ Verification Successful! You can now access the group.", show_alert=True)
+        try:
+            await query.message.edit_text(
+                f"<blockquote>✅ <b>VERIFICATION SUCCESSFUL</b></blockquote>\n\n"
+                f"Thank you <b>{user.first_name}</b>, you have been successfully verified and added to the group!",
+                parse_mode=ParseMode.HTML
+            )
+        except:
+            pass
+        return
+
+    # 2. Admin Live Stats
     if data == "admin_stats" and uid == ADMIN_ID:
         today = datetime.now().strftime("%Y-%m-%d")
         total_users = await users_col.count_documents({})
@@ -336,7 +355,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.edit_text(text, reply_markup=keyboard, parse_mode=ParseMode.HTML)
         return
 
-    # 2. Back to Admin Panel
+    # 3. Back to Admin Panel
     if data == "back_to_admin" and uid == ADMIN_ID:
         keyboard = InlineKeyboardMarkup([
             [get_color_btn("📊 View Bot Live Stats", callback_data="admin_stats", style="primary")],
@@ -350,7 +369,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.edit_text(text, reply_markup=keyboard, parse_mode=ParseMode.HTML)
         return
 
-    # 3. Initiate Broadcast Flow
+    # 4. Initiate Broadcast Flow
     if data in ["bcast_users", "bcast_chats"] and uid == ADMIN_ID:
         btype = "users" if data == "bcast_users" else "chats"
         bcast_state[uid] = {
@@ -375,7 +394,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.edit_text(text, parse_mode=ParseMode.HTML)
         return
 
-    # 4. Broadcast Color Button Selection
+    # 5. Broadcast Color Button Selection
     if data.startswith("setcol_") and uid == ADMIN_ID:
         if uid not in bcast_state or bcast_state[uid]["step"] != "btn_color":
             try: await query.answer("Session expired or invalid step.", show_alert=True)
