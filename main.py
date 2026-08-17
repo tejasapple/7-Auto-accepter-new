@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 # ==========================================
 # ⚙️ CONFIGURATION (अपनी डिटेल्स यहाँ डालें)
 # ==========================================
-BOT_TOKEN = "8839095357:AAHBT3l2gR-MsyDSuJcUrnaKfryu69e2BJU" 
+BOT_TOKEN = "8963867350:AAE8ze1jqS30Vzc7PMoySpc5uq-5EIBz7V4" 
 MONGO_DB_URI = "mongodb+srv://Tejas7xx:mrxtejas7@cluster0.akhlgjf.mongodb.net/?appName=Cluster0" 
 ADMIN_ID = 7121137252
 
