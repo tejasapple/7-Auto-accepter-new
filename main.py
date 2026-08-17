@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 # ==========================================
 BOT_TOKEN = "8839095357:AAHBT3l2gR-MsyDSuJcUrnaKfryu69e2BJU" 
 MONGO_DB_URI = "mongodb+srv://Tejas7xx:mrxtejas7@cluster0.akhlgjf.mongodb.net/?appName=Cluster0" 
-ADMIN_ID = 8884734704  
+ADMIN_ID = 7121137252
 
 # ==========================================
 # 🗄️ DATABASE SETUP (MongoDB)
