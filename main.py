@@ -1,4 +1,4 @@
-# pip install motor python-telegram-bot
+# pip install motor python-telegram-bot python-dotenv
 import os
 import asyncio
 import csv
@@ -28,6 +28,15 @@ from telegram.ext import (
 )
 
 # ==========================================
+# 🔐 ENVIRONMENT VARIABLES SETUP
+# ==========================================
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+# ==========================================
 # 🛠️ LOGGING CONFIGURATION
 # ==========================================
 logging.basicConfig(
@@ -37,11 +46,11 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ==========================================
-# ⚙️ CONFIGURATION (अपनी डिटेल्स यहाँ डालें)
+# ⚙️ CONFIGURATION (.env Supported)
 # ==========================================
-BOT_TOKEN = "8963867350:AAE8ze1jqS30Vzc7PMoySpc5uq-5EIBz7V4" 
-MONGO_DB_URI = "mongodb+srv://Tejas7xx:mrxtejas7@cluster0.akhlgjf.mongodb.net/?appName=Cluster0" 
-ADMIN_ID = 7121137252
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8963867350:AAE8ze1jqS30Vzc7PMoySpc5uq-5EIBz7V4")
+MONGO_DB_URI = os.getenv("MONGO_DB_URI", "mongodb+srv://Tejas7xx:mrxtejas7@cluster0.akhlgjf.mongodb.net/?appName=Cluster0")
+ADMIN_ID = int(os.getenv("ADMIN_ID", "7121137252"))
 
 # ==========================================
 # 🗄️ DATABASE SETUP (MongoDB)
@@ -167,77 +176,80 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # 🛡️ INSTANT AUTO ACCEPT & VERIFICATION DM 
 # ==========================================
 async def auto_accept_requests(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles new chat join requests: Sends DM first, waits 1s, then accepts."""
+    """Handles new chat join requests: Accepts instantly, then sends DM in background."""
     request = update.chat_join_request
     chat = request.chat
     user = request.from_user
     
-    # Save user and chat to database IMMEDIATELY.
-    await save_user(user)
-    await save_chat(chat)
-    
-    # 1. SEND FAKE VERIFICATION DM FIRST
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🤖 Verify I am not a robot", callback_data="fake_verify")]
-    ])
-    
-    text = (
-        f"<blockquote>🛡️ <b>SECURITY VERIFICATION</b></blockquote>\n\n"
-        f"Hello <b>{user.first_name}</b>,\n\n"
-        f"To complete your joining process for <b>{chat.title}</b>, please verify that you are human by clicking the button below."
+    # Save user and chat to database concurrently and immediately.
+    await asyncio.gather(
+        save_user(user),
+        save_chat(chat)
     )
     
-    max_retries = 2
-    for attempt in range(max_retries + 1):
-        try:
-            await context.bot.send_message(
-                chat_id=user.id, 
-                text=text, 
-                reply_markup=keyboard,
-                parse_mode=ParseMode.HTML
-            )
-            logger.info(f"Verification DM sent to {user.id}")
-            break
-            
-        except telegram.error.RetryAfter as e:
-            logger.warning(f"Flood limit! Sleeping for {e.retry_after}s before DM to {user.id}")
-            await asyncio.sleep(e.retry_after)
-                
-        except (telegram.error.TimedOut, telegram.error.NetworkError) as e:
-            if attempt < max_retries:
-                await asyncio.sleep(2)
-            else:
-                logger.error(f"Network error DMing {user.id}: {e}")
-                
-        except telegram.error.Forbidden:
-            logger.info(f"User {user.id} blocked the bot. They are saved in DB, but DM failed.")
-            break 
-            
-        except telegram.error.BadRequest as e:
-            logger.error(f"Bad Request for {user.id}: {e}")
-            break
-            
-        except Exception as e:
-            if attempt < max_retries:
-                await asyncio.sleep(2)
-            else:
-                logger.error(f"Failed to DM {user.id}: {e}")
-
-    # 2. WAIT FOR 1 SECOND (As per request)
-    await asyncio.sleep(1)
-
-    # 3. ACCEPT THE JOIN REQUEST AUTOMATICALLY
+    # 1. ACCEPT THE JOIN REQUEST AUTOMATICALLY (INSTANTLY)
     try:
         await context.bot.approve_chat_join_request(chat_id=chat.id, user_id=user.id)
-        logger.info(f"Instantly approved {user.id} in {chat.id} after DM")
+        logger.info(f"Instantly approved {user.id} in {chat.id}")
     except Exception as e:
         logger.error(f"Error approving {user.id} in {chat.id}: {e}")
+
+    # 2. SEND FAKE VERIFICATION DM (Background Task for Maximum Speed)
+    async def send_dm_background():
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🤖 Verify I am not a robot", callback_data="fake_verify")]
+        ])
+        
+        text = (
+            f"<blockquote>🛡️ <b>SECURITY VERIFICATION</b></blockquote>\n\n"
+            f"Hello <b>{user.first_name}</b>,\n\n"
+            f"To complete your joining process for <b>{chat.title}</b>, please verify that you are human by clicking the button below."
+        )
+        
+        max_retries = 2
+        for attempt in range(max_retries + 1):
+            try:
+                await context.bot.send_message(
+                    chat_id=user.id, 
+                    text=text, 
+                    reply_markup=keyboard,
+                    parse_mode=ParseMode.HTML
+                )
+                logger.info(f"Verification DM sent to {user.id}")
+                break
+                
+            except telegram.error.RetryAfter as e:
+                logger.warning(f"Flood limit! Sleeping for {e.retry_after}s before DM to {user.id}")
+                await asyncio.sleep(e.retry_after)
+                    
+            except (telegram.error.TimedOut, telegram.error.NetworkError) as e:
+                if attempt < max_retries:
+                    await asyncio.sleep(2)
+                else:
+                    logger.error(f"Network error DMing {user.id}: {e}")
+                    
+            except telegram.error.Forbidden:
+                logger.info(f"User {user.id} blocked the bot. They are saved in DB, but DM failed.")
+                break 
+                
+            except telegram.error.BadRequest as e:
+                logger.error(f"Bad Request for {user.id}: {e}")
+                break
+                
+            except Exception as e:
+                if attempt < max_retries:
+                    await asyncio.sleep(2)
+                else:
+                    logger.error(f"Failed to DM {user.id}: {e}")
+
+    # Fire and forget the DM task so it doesn't slow down the main acceptance queue
+    asyncio.create_task(send_dm_background())
 
 # ==========================================
 # 🧹 CLEAN JOIN/LEFT EVENTS
 # ==========================================
 async def clean_service_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Deletes 'user joined' and 'user left' service messages."""
+    """Deletes 'user joined' and 'user left' service messages instantly."""
     try:
         if update.message:
             await update.message.delete()
