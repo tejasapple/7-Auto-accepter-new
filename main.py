@@ -665,7 +665,14 @@ async def execute_broadcast(context: ContextTypes.DEFAULT_TYPE, admin_id: int, s
 # ⚙️ BOT INITIALIZATION & COMMAND SETUP
 # ==========================================
 async def post_init(application: Application):
-    """Sets up the bot commands menu automatically."""
+    """Sets up the bot commands menu automatically and clears any existing webhook to prevent polling conflicts."""
+    try:
+        # Delete webhook before starting polling to fix 'Conflict: can't use getUpdates'
+        await application.bot.delete_webhook(drop_pending_updates=True)
+        logger.info("Webhook successfully deleted to prevent polling conflicts.")
+    except Exception as e:
+        logger.warning(f"Failed to delete webhook: {e}")
+
     commands = [
         BotCommand("start", "Start the bot"),
         BotCommand("help", "Get help and instructions"),
